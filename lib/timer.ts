@@ -137,7 +137,7 @@ export class TimerEngine {
   for (const m of marks) {
     if (r <= m && !this.cuesFired.has(m)) {
       this.cuesFired.add(m);
-      const offset = m - r; // how early we are
+      
       if (m === 0) this.cb.playBuzz();
       else if (m === 60_000) this.cb.playBeep(1000, 250);
       else this.cb.playBeep();

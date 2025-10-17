@@ -37,11 +37,12 @@ export default function Home() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   // Persist settings
-  useEffect(() => localStorage.setItem("gt.mode", mode), [mode]);
-  useEffect(() => localStorage.setItem("gt.x", String(xMin)), [xMin]);
-  useEffect(() => localStorage.setItem("gt.y", String(ySec)), [ySec]);
-  useEffect(() => localStorage.setItem("gt.sound", String(soundOn)), [soundOn]);
-  useEffect(() => localStorage.setItem("gt.flash", String(flashOn)), [flashOn]);
+  useEffect(() => { localStorage.setItem("gt.mode", mode); }, [mode]);
+  useEffect(() => { localStorage.setItem("gt.x", String(xMin)); }, [xMin]);
+  useEffect(() => { localStorage.setItem("gt.y", String(ySec)); }, [ySec]);
+  useEffect(() => { localStorage.setItem("gt.sound", String(soundOn)); }, [soundOn]);
+  useEffect(() => { localStorage.setItem("gt.flash", String(flashOn)); }, [flashOn]);
+
 
   // Ensure engine exists
   const ensureEngine = () => {
@@ -72,7 +73,11 @@ export default function Home() {
       if (e.repeat) return;
       if (e.code === "Space") {
         e.preventDefault();
-        isRunning ? handlePauseResume() : handleStart();
+        if (isRunning) {
+          handlePauseResume();
+        } else {
+          handleStart();
+        }
       } else if (e.key.toLowerCase() === "s") {
         handleStop();
       } else if (e.key.toLowerCase() === "f") {

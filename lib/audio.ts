@@ -1,8 +1,18 @@
+type AudioContextConstructor = typeof AudioContext;
+type AudioWindow = Window & {
+  AudioContext?: AudioContextConstructor;
+  webkitAudioContext?: AudioContextConstructor;
+};
+
 // Sample-accurate competition beeps/buzzes
 export function createAudio() {
-  const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
-  const ctx = new Ctx();
+  const audioWindow = window as AudioWindow;
+  const Ctx = audioWindow.AudioContext ?? audioWindow.webkitAudioContext;
+  if (!Ctx) {
+    throw new Error("Web Audio API is not supported in this browser.");
+  }
 
+  const ctx = new Ctx();
   // allow audio on first click / key
   const resume = () => { if (ctx.state === "suspended") ctx.resume(); };
   ["click","keydown","touchstart"].forEach(ev =>
