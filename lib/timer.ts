@@ -33,15 +33,16 @@ export class TimerEngine {
   private mode: Mode = "session";
   private round = 0;
   private cuesFired = new Set<number>();
+  private lastRemaining = 0;
 
   constructor(cb: Callbacks) {
     this.cb = cb;
   }
 
-  start(mode: Mode, xMin: number, ySec: number) {
+  start(mode: Mode, climbDurationMs: number, ySec: number) {
     this.stop();
     this.mode = mode;
-    this.climbMs = xMin * 60_000;
+    this.climbMs = Math.max(1_000, climbDurationMs);
     this.transMs = ySec * 1000;
     this.round = 0;
     this.enterClimb(this.climbMs);
@@ -65,6 +66,7 @@ export class TimerEngine {
     this.stopRAF();
     this.setPhase("idle");
     this.cuesFired.clear();
+    this.lastRemaining = 0;
   }
 
   isPaused() {
@@ -77,6 +79,7 @@ export class TimerEngine {
     this.cb.onRound(this.round);
     this.deadline = performance.now() + ms;
     this.cuesFired.clear();
+    this.lastRemaining = ms;
     this.setPhase("running-climb");
     this.tick();
   }
@@ -84,13 +87,16 @@ export class TimerEngine {
   private enterTransition(ms: number) {
     this.deadline = performance.now() + ms;
     this.cuesFired.clear();
+    this.lastRemaining = ms;
     this.setPhase("running-transition");
     this.tick();
   }
 
   private endPhase() {
-    // Play the 0s buzz (end of phase)
-    this.cb.playBuzz();
+    if (!this.cuesFired.has(0)) {
+      this.cb.playBuzz();
+      this.cuesFired.add(0);
+    }
     if (this.mode === "session") {
       this.stop();
       return;
@@ -112,11 +118,14 @@ export class TimerEngine {
   private tick = () => {
     const now = performance.now();
     const remaining = Math.max(0, Math.round(this.deadline - now));
-    this.cb.onTick(remaining);
+    const prevRemaining = this.lastRemaining;
 
     // cue schedule
-    if (this.phase.includes("climb")) this.fireClimbCues(remaining);
-    else if (this.phase.includes("transition")) this.fireTransitionCues(remaining);
+    if (this.phase.includes("climb")) this.fireClimbCues(prevRemaining, remaining);
+    else if (this.phase.includes("transition")) this.fireTransitionCues(prevRemaining, remaining);
+
+    this.lastRemaining = remaining;
+    this.cb.onTick(remaining);
 
     if (remaining <= 0) {
       this.stopRAF();
@@ -131,30 +140,37 @@ export class TimerEngine {
     this.rafId = null;
   }
 
-    // ---- cues
-  private fireClimbCues(r: number) {
-  const marks = [60_000, 5_000, 4_000, 3_000, 2_000, 1_000, 0];
-  for (const m of marks) {
-    if (r <= m && !this.cuesFired.has(m)) {
-      this.cuesFired.add(m);
-      
-      if (m === 0) this.cb.playBuzz();
-      else if (m === 60_000) this.cb.playBeep(1000, 250);
-      else this.cb.playBeep();
+  // ---- cues
+  private fireClimbCues(prev: number, current: number) {
+    const marks = [60_000, 5_000, 4_000, 3_000, 2_000, 1_000, 0];
+    for (const m of marks) {
+      if (m > this.climbMs) continue;
+      const leadWindow = 1_000;
+      const withinLead = prev > m && prev <= m + leadWindow;
+      const crossedThreshold = current <= m;
+      const shouldTrigger = withinLead || crossedThreshold;
+      if (shouldTrigger && !this.cuesFired.has(m)) {
+        this.cuesFired.add(m);
+        if (m === 0) this.cb.playBuzz();
+        else if (m === 60_000) this.cb.playBuzz();
+        else this.cb.playBeep();
+      }
     }
   }
-}
 
-private fireTransitionCues(r: number) {
-  const marks = [5_000, 4_000, 3_000, 2_000, 1_000, 0];
-  for (const m of marks) {
-    if (r <= m && !this.cuesFired.has(m)) {
-      this.cuesFired.add(m);
-      if (m === 0) this.cb.playBuzz();
-      else this.cb.playBeep(900, 150);
+  private fireTransitionCues(prev: number, current: number) {
+    const marks = [5_000, 4_000, 3_000, 2_000, 1_000, 0];
+    for (const m of marks) {
+      if (m > this.transMs) continue;
+      const leadWindow = 1_000;
+      const withinLead = prev > m && prev <= m + leadWindow;
+      const crossedThreshold = current <= m;
+      const shouldTrigger = withinLead || crossedThreshold;
+      if (shouldTrigger && !this.cuesFired.has(m)) {
+        this.cuesFired.add(m);
+        if (m === 0) this.cb.playBuzz();
+        else this.cb.playBeep(900, 150);
+      }
     }
   }
-}
-
-
 }

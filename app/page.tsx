@@ -10,7 +10,10 @@ import { TimerEngine, type Mode, type Phase, formatMMSS, clamp } from "../lib/ti
 export default function Home() {
   // Safe defaults (no localStorage access on server)
   const [mode, setMode] = useState<Mode>("session");
-  const [xMin, setXMin] = useState<number>(20);
+  const defaultClimbMinutes = 20;
+  const defaultClimbSeconds = 0;
+  const [xMin, setXMin] = useState<number>(defaultClimbMinutes);
+  const [xSec, setXSec] = useState<number>(defaultClimbSeconds);
   const [ySec, setYSec] = useState<number>(15);
   const [soundOn, setSoundOn] = useState<boolean>(true);
   const [flashOn, setFlashOn] = useState<boolean>(true);
@@ -19,7 +22,19 @@ export default function Home() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     setMode((localStorage.getItem("gt.mode") as Mode) || "session");
-    setXMin(Number(localStorage.getItem("gt.x") ?? 20));
+    const storedMin = localStorage.getItem("gt.xMin");
+    const storedSec = localStorage.getItem("gt.xSec");
+    const legacyMinutes = localStorage.getItem("gt.x");
+    if (storedMin !== null || storedSec !== null) {
+      const parsedMin = Number(storedMin ?? defaultClimbMinutes);
+      const parsedSec = Number(storedSec ?? defaultClimbSeconds);
+      setXMin(Number.isFinite(parsedMin) ? clamp(parsedMin, 0, 180) : defaultClimbMinutes);
+      setXSec(Number.isFinite(parsedSec) ? clamp(parsedSec, 0, 59) : defaultClimbSeconds);
+    } else if (legacyMinutes !== null) {
+      const legacyValue = Number(legacyMinutes);
+      setXMin(Number.isFinite(legacyValue) ? clamp(legacyValue, 0, 180) : defaultClimbMinutes);
+      setXSec(defaultClimbSeconds);
+    }
     setYSec(Number(localStorage.getItem("gt.y") ?? 15));
     setSoundOn(localStorage.getItem("gt.sound") !== "false");
     setFlashOn(localStorage.getItem("gt.flash") !== "false");
@@ -31,14 +46,25 @@ export default function Home() {
 
   // UI state
   const [phase, setPhase] = useState<Phase>("idle");
-  const [remainingMs, setRemainingMs] = useState<number>(xMin * 60_000);
+  const [remainingMs, setRemainingMs] = useState<number>(
+    defaultClimbMinutes * 60_000 + defaultClimbSeconds * 1_000
+  );
   const [round, setRound] = useState<number>(0);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const climbMs = useMemo(
+    () => xMin * 60_000 + xSec * 1_000,
+    [xMin, xSec]
+  );
 
   // Persist settings
   useEffect(() => { localStorage.setItem("gt.mode", mode); }, [mode]);
-  useEffect(() => { localStorage.setItem("gt.x", String(xMin)); }, [xMin]);
+  useEffect(() => {
+    localStorage.setItem("gt.xMin", String(xMin));
+    localStorage.setItem("gt.xSec", String(xSec));
+    // retain legacy key for older deployments
+    localStorage.setItem("gt.x", String(xMin));
+  }, [xMin, xSec]);
   useEffect(() => { localStorage.setItem("gt.y", String(ySec)); }, [ySec]);
   useEffect(() => { localStorage.setItem("gt.sound", String(soundOn)); }, [soundOn]);
   useEffect(() => { localStorage.setItem("gt.flash", String(flashOn)); }, [flashOn]);
@@ -62,10 +88,10 @@ export default function Home() {
   // Reflect presets while idle
   useEffect(() => {
     if (phase === "idle") {
-      setRemainingMs(xMin * 60_000);
+      setRemainingMs(climbMs);
       setRound(0);
     }
-  }, [xMin, mode, phase]);
+  }, [climbMs, mode, phase]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -89,8 +115,9 @@ export default function Home() {
   }, [isRunning, phase]); // eslint-disable-line
 
   const handleStart = () => {
+    if (climbMs <= 0) return;
     const eng = ensureEngine();
-    eng.start(mode, xMin, ySec);
+    eng.start(mode, climbMs, ySec);
     setIsRunning(true);
   };
 
@@ -110,7 +137,7 @@ export default function Home() {
     engineRef.current = null;
     setIsRunning(false);
     setPhase("idle");
-    setRemainingMs(xMin * 60_000);
+    setRemainingMs(climbMs);
     setRound(0);
   };
 
@@ -131,10 +158,10 @@ export default function Home() {
       return `Next: Transition ${formatMMSS(ySec * 1000)}`;
     }
     if (phase === "running-transition" || phase === "paused-transition") {
-      return `Next: Climb ${formatMMSS(xMin * 60_000)}`;
+      return `Next: Climb ${formatMMSS(climbMs)}`;
     }
     return "";
-  }, [mode, phase, xMin, ySec]);
+  }, [mode, phase, climbMs, ySec]);
 
   // Flash during last 5 seconds
   const flashing =
@@ -162,17 +189,37 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2">
-            <label className="text-sm text-slate-300">X (min)</label>
-            <input
-              type="number"
-              min={1}
-              max={180}
-              step={1}
-              className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2"
-              value={xMin}
-              onChange={(e) => setXMin(clamp(parseInt(e.target.value || "0", 10), 1, 180))}
-              disabled={isRunning && !phase.startsWith("paused")}
-            />
+            <label className="text-sm text-slate-300">Climb</label>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={0}
+                max={180}
+                step={1}
+                className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2"
+                value={xMin}
+                onChange={(e) =>
+                  setXMin(clamp(parseInt(e.target.value || "0", 10), 0, 180))
+                }
+                disabled={isRunning && !phase.startsWith("paused")}
+              />
+              <span className="text-xs uppercase text-slate-500">min</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={0}
+                max={59}
+                step={1}
+                className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2"
+                value={xSec}
+                onChange={(e) =>
+                  setXSec(clamp(parseInt(e.target.value || "0", 10), 0, 59))
+                }
+                disabled={isRunning && !phase.startsWith("paused")}
+              />
+              <span className="text-xs uppercase text-slate-500">sec</span>
+            </div>
           </div>
 
           {mode === "rotation" && (

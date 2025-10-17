@@ -46,7 +46,7 @@ export function createAudio() {
     /** play immediately */
     beep: (freq = 1000, durMs = 180, type: OscillatorType = "square") =>
       scheduleTone(freq, durMs, 0, type, 0.9),
-    buzz: () => scheduleTone(180, 600, 0, "triangle", 0.9),
+    buzz: () => scheduleTone(400, 1200, 0, "sawtooth", 0.9),
 
     /** schedule relative to performance.now() (for frame-perfect cues) */
     scheduleBeep: (freq = 1000, durMs = 180, whenMs = 0) =>
