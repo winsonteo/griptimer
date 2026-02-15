@@ -1,44 +1,38 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PhasePill } from "../components/PhasePill";
 import { Controls } from "../components/Controls";
 import { TimerDisplay } from "../components/TimerDisplay";
 import { createAudio } from "../lib/audio";
 import { TimerEngine, type Mode, type Phase, formatMMSS, clamp } from "../lib/timer";
+import { useLocalStorageString, useLocalStorageNumber, useLocalStorageBoolean } from "../hooks/useLocalStorage";
 
 export default function Home() {
-  // Safe defaults (no localStorage access on server)
-  const [mode, setMode] = useState<Mode>("session");
-  const defaultClimbMinutes = 20;
-  const defaultClimbSeconds = 0;
-  const [xMin, setXMin] = useState<number>(defaultClimbMinutes);
-  const [xSec, setXSec] = useState<number>(defaultClimbSeconds);
-  const [ySec, setYSec] = useState<number>(15);
-  const [soundOn, setSoundOn] = useState<boolean>(true);
-  const [flashOn, setFlashOn] = useState<boolean>(true);
+  // Persistent settings with localStorage hooks
+  const [mode, setMode] = useLocalStorageString("gt.mode", "session") as [Mode, (mode: Mode) => void];
+  const [xMin, _setXMin] = useLocalStorageNumber("gt.xMin", 20);
+  const [xSec, _setXSec] = useLocalStorageNumber("gt.xSec", 0);
+  
+  // Wrapped setters with validation
+  const setXMin = useCallback((value: number) => _setXMin(clamp(value, 0, 180)), [_setXMin]);
+  const setXSec = useCallback((value: number) => _setXSec(clamp(value, 0, 59)), [_setXSec]);
+  const [ySec, setYSec] = useLocalStorageNumber("gt.y", 15);
+  const [soundOn, setSoundOn] = useLocalStorageBoolean("gt.sound", true);
+  const [flashOn, setFlashOn] = useLocalStorageBoolean("gt.flash", true);
 
-  // Load from localStorage only after mount (client-side)
+  // Legacy migration for xMin (from old "gt.x" key)
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setMode((localStorage.getItem("gt.mode") as Mode) || "session");
-    const storedMin = localStorage.getItem("gt.xMin");
-    const storedSec = localStorage.getItem("gt.xSec");
-    const legacyMinutes = localStorage.getItem("gt.x");
-    if (storedMin !== null || storedSec !== null) {
-      const parsedMin = Number(storedMin ?? defaultClimbMinutes);
-      const parsedSec = Number(storedSec ?? defaultClimbSeconds);
-      setXMin(Number.isFinite(parsedMin) ? clamp(parsedMin, 0, 180) : defaultClimbMinutes);
-      setXSec(Number.isFinite(parsedSec) ? clamp(parsedSec, 0, 59) : defaultClimbSeconds);
-    } else if (legacyMinutes !== null) {
-      const legacyValue = Number(legacyMinutes);
-      setXMin(Number.isFinite(legacyValue) ? clamp(legacyValue, 0, 180) : defaultClimbMinutes);
-      setXSec(defaultClimbSeconds);
+    const legacy = localStorage.getItem("gt.x");
+    if (legacy !== null && localStorage.getItem("gt.xMin") === null) {
+      const legacyValue = Number(legacy);
+      if (Number.isFinite(legacyValue)) {
+        setXMin(clamp(legacyValue, 0, 180));
+        localStorage.setItem("gt.x", String(legacyValue)); // preserve for other deployments
+      }
     }
-    setYSec(Number(localStorage.getItem("gt.y") ?? 15));
-    setSoundOn(localStorage.getItem("gt.sound") !== "false");
-    setFlashOn(localStorage.getItem("gt.flash") !== "false");
-  }, []);
+  }, [setXMin]);
 
   // Engine + audio
   const engineRef = useRef<TimerEngine | null>(null);
@@ -47,7 +41,7 @@ export default function Home() {
   // UI state
   const [phase, setPhase] = useState<Phase>("idle");
   const [remainingMs, setRemainingMs] = useState<number>(
-    defaultClimbMinutes * 60_000 + defaultClimbSeconds * 1_000
+    20 * 60_000 + 0 * 1_000
   );
   const [round, setRound] = useState<number>(0);
   const [isRunning, setIsRunning] = useState<boolean>(false);
@@ -57,21 +51,16 @@ export default function Home() {
     [xMin, xSec]
   );
 
-  // Persist settings
-  useEffect(() => { localStorage.setItem("gt.mode", mode); }, [mode]);
+  // Maintain legacy key for backward compatibility
   useEffect(() => {
-    localStorage.setItem("gt.xMin", String(xMin));
-    localStorage.setItem("gt.xSec", String(xSec));
-    // retain legacy key for older deployments
-    localStorage.setItem("gt.x", String(xMin));
-  }, [xMin, xSec]);
-  useEffect(() => { localStorage.setItem("gt.y", String(ySec)); }, [ySec]);
-  useEffect(() => { localStorage.setItem("gt.sound", String(soundOn)); }, [soundOn]);
-  useEffect(() => { localStorage.setItem("gt.flash", String(flashOn)); }, [flashOn]);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("gt.x", String(xMin));
+    }
+  }, [xMin]);
 
 
   // Ensure engine exists
-  const ensureEngine = () => {
+  const ensureEngine = useCallback(() => {
     if (!engineRef.current) {
       if (!audioRef.current) audioRef.current = createAudio();
       engineRef.current = new TimerEngine({
@@ -83,7 +72,44 @@ export default function Home() {
       });
     }
     return engineRef.current;
-  };
+  }, [soundOn]);
+
+  const handleStart = useCallback(() => {
+    if (climbMs <= 0) return;
+    const eng = ensureEngine();
+    eng.start(mode, climbMs, ySec);
+    setIsRunning(true);
+  }, [climbMs, mode, ySec, ensureEngine]);
+
+  const handlePauseResume = useCallback(() => {
+    const eng = ensureEngine();
+    if (eng.isPaused()) {
+      eng.resume();
+      setIsRunning(true);
+    } else {
+      eng.pause();
+      setIsRunning(false);
+    }
+  }, [ensureEngine]);
+
+  const handleStop = useCallback(() => {
+    engineRef.current?.stop();
+    engineRef.current = null;
+    setIsRunning(false);
+    setPhase("idle");
+    setRemainingMs(climbMs);
+    setRound(0);
+  }, [climbMs]);
+
+  const toggleFullscreen = useCallback(async () => {
+    if (!document.fullscreenElement) {
+      await document.documentElement.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      await document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
+    }
+  }, []);
 
   // Reflect presets while idle
   useEffect(() => {
@@ -112,44 +138,7 @@ export default function Home() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isRunning, phase]); // eslint-disable-line
-
-  const handleStart = () => {
-    if (climbMs <= 0) return;
-    const eng = ensureEngine();
-    eng.start(mode, climbMs, ySec);
-    setIsRunning(true);
-  };
-
-  const handlePauseResume = () => {
-    const eng = ensureEngine();
-    if (eng.isPaused()) {
-      eng.resume();
-      setIsRunning(true);
-    } else {
-      eng.pause();
-      setIsRunning(false);
-    }
-  };
-
-  const handleStop = () => {
-    engineRef.current?.stop();
-    engineRef.current = null;
-    setIsRunning(false);
-    setPhase("idle");
-    setRemainingMs(climbMs);
-    setRound(0);
-  };
-
-  const toggleFullscreen = async () => {
-    if (!document.fullscreenElement) {
-      await document.documentElement.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      await document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
-    }
-  };
+  }, [isRunning, handlePauseResume, handleStart, handleStop, toggleFullscreen]);
 
   // Rotation hint
   const nextHint = useMemo(() => {
