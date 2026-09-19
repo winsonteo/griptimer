@@ -158,7 +158,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen flex flex-col">
-      <header className="p-4 md:p-6 flex flex-col md:flex-row gap-3 md:items-end md:justify-between">
+      <header className={`flex flex-col md:flex-row gap-3 md:items-end md:justify-between ${isFullscreen ? "p-2 md:p-3" : "p-4 md:p-6"}`}>
         {/* Left: Mode & Inputs */}
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex items-center gap-2">
@@ -257,16 +257,16 @@ export default function Home() {
             : ""
         }`}
       >
-        <div className={`w-full max-w-5xl text-center ${flashing ? "animate-pulse" : ""}`}>
+        <div className={`w-full text-center ${isFullscreen ? "max-w-none" : "max-w-5xl"} ${flashing ? "animate-pulse" : ""}`}>
           <PhasePill phase={phase} />
-          <TimerDisplay ms={remainingMs} />
-          {mode === "rotation" && <p className="mt-2 text-slate-400">{nextHint}</p>}
-          {mode === "rotation" && <p className="mt-1 text-slate-500 text-sm">Round: {round}</p>}
+          <TimerDisplay ms={remainingMs} fullscreen={isFullscreen} />
+          {mode === "rotation" && <p className={`mt-2 text-slate-400 ${isFullscreen ? "text-2xl md:text-4xl" : ""}`}>{nextHint}</p>}
+          {mode === "rotation" && <p className={`mt-1 text-slate-500 text-sm ${isFullscreen ? "text-xl md:text-2xl" : ""}`}>Round: {round}</p>}
         </div>
       </section>
 
       {/* Controls */}
-      <footer className="p-4 md:p-6 flex justify-center">
+      <footer className={`flex justify-center ${isFullscreen ? "p-2 md:p-3" : "p-4 md:p-6"}`}>
         <Controls
   isRunning={isRunning}
   phase={phase}
